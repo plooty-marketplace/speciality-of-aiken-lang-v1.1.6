@@ -1,56 +1,20 @@
-Here’s how to implement a **working demo** of the **GitHub Actions + Firebase Functions** pipeline, with added support for multiple alert channels like **email** and **PagerDuty**.
+### **Setting Up a Real-Time Monitoring Dashboard for Alerts**
+
+A live monitoring dashboard can help you track and visualize the alerts sent via Slack, email, and PagerDuty. Here's how to build a simple dashboard with Firebase Firestore, React (or Vue.js), and Firebase Hosting.
 
 ---
 
-### **1. Working Demo of GitHub Actions + Firebase Functions**
+### **1. Backend: Log Alerts in Firestore**
 
-#### **Step 1: Complete Firebase Functions Deployment Workflow**
-Use the `.github/workflows/firebase-deploy.yml` file to automate function deployments:
-
-```yaml
-name: Deploy Firebase Functions
-
-on:
-  push:
-    paths:
-      - "functions/**"
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-
-      - name: Install Firebase CLI
-        run: npm install -g firebase-tools
-
-      - name: Authenticate with Firebase
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: |
-          echo "${FIREBASE_SERVICE_ACCOUNT}" > firebase-key.json
-          firebase auth:login --no-localhost
-          firebase use --add default
-
-      - name: Deploy Functions
-        run: firebase deploy --only functions
-```
-
-#### **Step 2: Example Firebase Function with Alerting**
-In `functions/index.js`, add a function that integrates **Slack**, **email**, and **PagerDuty**:
+#### **Step 1: Update Firebase Function**
+Modify the `sendAlerts` function to log all alerts into Firestore. Update `functions/index.js`:
 
 ```javascript
-const functions = require("firebase-functions");
-const fetch = require("node-fetch");
-const nodemailer = require("nodemailer");
+const admin = require("firebase-admin");
+admin.initializeApp();
+const db = admin.firestore();
 
+// Add to the existing sendAlerts function
 exports.sendAlerts = functions.https.onRequest(async (req, res) => {
   const { text, severity } = req.body;
 
@@ -59,142 +23,215 @@ exports.sendAlerts = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  const slackWebhook = functions.config().slack.webhook_url;
-  const emailRecipient = functions.config().email.recipient;
-
   try {
-    // Send Slack Alert
-    await fetch(slackWebhook, {
-      method: "POST",
-      body: JSON.stringify({
-        text: `*${severity.toUpperCase()}*: ${text}`,
-        attachments: [{ text: "Check the logs for details." }],
-      }),
-      headers: { "Content-Type": "application/json" },
-    });
+    // Save the alert to Firestore
+    const alertData = {
+      text,
+      severity,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await db.collection("alerts").add(alertData);
 
-    // Send Email Alert
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: functions.config().email.sender,
-        pass: functions.config().email.password,
-      },
-    });
+    // Existing alert delivery logic (Slack, email, PagerDuty)
+    // ...
 
-    await transporter.sendMail({
-      from: functions.config().email.sender,
-      to: emailRecipient,
-      subject: `${severity.toUpperCase()} Alert`,
-      text: text,
-    });
-
-    // Simulate PagerDuty Alert
-    if (severity === "critical") {
-      await fetch("https://events.pagerduty.com/v2/enqueue", {
-        method: "POST",
-        body: JSON.stringify({
-          routing_key: functions.config().pagerduty.api_key,
-          event_action: "trigger",
-          payload: {
-            summary: text,
-            severity: "critical",
-            source: "firebase-functions",
-          },
-        }),
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    console.log("Alerts sent successfully.");
-    res.status(200).send("Alerts sent successfully.");
+    res.status(200).send("Alert sent and logged successfully.");
   } catch (error) {
-    console.error("Failed to send alerts:", error);
-    res.status(500).send("Failed to send alerts.");
+    console.error("Failed to send and log alerts:", error);
+    res.status(500).send("Failed to send and log alerts.");
   }
 });
 ```
 
 ---
 
-### **2. Adding Email Alerts with Gmail**
+### **2. Frontend: Create a Dashboard**
 
-#### **Step 1: Set Up Gmail SMTP Credentials**
-1. Use a dedicated Gmail account for sending alerts.
-2. Enable **"Allow less secure apps"** in Gmail settings (or set up an app password for increased security).
-3. Add the credentials to Firebase Functions:
+#### **Step 1: Initialize React or Vue.js**
+1. Create a React app:
    ```bash
-   firebase functions:config:set email.sender="your-email@gmail.com" \
-       email.password="your-password" \
-       email.recipient="recipient-email@example.com"
+   npx create-react-app alert-dashboard
+   cd alert-dashboard
    ```
-
-#### **Step 2: Deploy Updated Function**
-Run:
-```bash
-firebase deploy --only functions
-```
-
----
-
-### **3. Adding PagerDuty Alerts**
-
-#### **Step 1: Set Up PagerDuty Integration**
-1. Go to **PagerDuty** > **Integrations**.
-2. Create a new **Event Rules** integration.
-3. Copy the **Integration Key** (routing key) and set it in Firebase:
+   Or use Vue.js:
    ```bash
-   firebase functions:config:set pagerduty.api_key="your-pagerduty-integration-key"
+   npm create vue@latest alert-dashboard
+   cd alert-dashboard
+   npm install
    ```
 
-#### **Step 2: Deploy Updated Function**
-Run:
-```bash
-firebase deploy --only functions
+2. Install Firebase SDK:
+   ```bash
+   npm install firebase
+   ```
+
+#### **Step 2: Configure Firebase in the Frontend**
+In `src/firebaseConfig.js`:
+```javascript
+import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "your-api-key",
+  authDomain: "your-auth-domain",
+  projectId: "your-project-id",
+  storageBucket: "your-storage-bucket",
+  messagingSenderId: "your-messaging-sender-id",
+  appId: "your-app-id",
+};
+
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app);
 ```
 
 ---
 
-### **4. Testing the Alert System**
+#### **Step 3: Display Alerts in the Dashboard**
+Use Firestore's real-time listener to fetch alerts. In `src/App.js` (React example):
 
-#### **Step 1: Test Slack Alerts**
-Use a tool like `Postman` or `cURL` to trigger the function:
-```bash
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"text": "Critical issue detected!", "severity": "critical"}' \
-  https://<your-cloud-function-url>/sendAlerts
+```javascript
+import React, { useEffect, useState } from "react";
+import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { db } from "./firebaseConfig";
+
+function App() {
+  const [alerts, setAlerts] = useState([]);
+
+  useEffect(() => {
+    const q = query(collection(db, "alerts"), orderBy("timestamp", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setAlerts(
+        snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+      );
+    });
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <h1>Real-Time Alert Dashboard</h1>
+      <table border="1" cellPadding="10">
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Message</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody>
+          {alerts.map((alert) => (
+            <tr key={alert.id}>
+              <td>{alert.severity}</td>
+              <td>{alert.text}</td>
+              <td>{new Date(alert.timestamp?.seconds * 1000).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default App;
 ```
 
-You should see:
-- A Slack notification in the configured channel.
-- An email alert in the recipient's inbox.
-- A PagerDuty incident created for critical issues.
+For Vue.js, use:
+```vue
+<script>
+import { ref, onMounted } from "vue";
+import { db } from "./firebaseConfig";
+import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 
-#### **Step 2: Monitor Logs**
-Check logs in the Firebase Console to ensure all alerts are sent successfully.
+export default {
+  setup() {
+    const alerts = ref([]);
+
+    onMounted(() => {
+      const q = query(collection(db, "alerts"), orderBy("timestamp", "desc"));
+      onSnapshot(q, (snapshot) => {
+        alerts.value = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+      });
+    });
+
+    return { alerts };
+  },
+};
+</script>
+
+<template>
+  <div>
+    <h1>Real-Time Alert Dashboard</h1>
+    <table border="1" cellpadding="10">
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Message</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="alert in alerts" :key="alert.id">
+          <td>{{ alert.severity }}</td>
+          <td>{{ alert.text }}</td>
+          <td>{{ new Date(alert.timestamp.seconds * 1000).toLocaleString() }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>
+```
 
 ---
 
-### **5. Enhance the Demo with GitHub Workflow Trigger**
+### **3. Deploy the Dashboard**
 
-#### **Trigger Alerts on Workflow Failures**
-Update your GitHub Actions workflow to trigger the Firebase function when a step fails.
+#### **Step 1: Build the Project**
+React:
+```bash
+npm run build
+```
+Vue.js:
+```bash
+npm run build
+```
 
-1. Add a Slack Notification Step in the workflow:
-   ```yaml
-   - name: Send Alert to Firebase
-     if: failure()
-     run: |
-       curl -X POST -H "Content-Type: application/json" \
-       -d '{"text": "Build failed for ${{ github.repository }}", "severity": "critical"}' \
-       https://<your-cloud-function-url>/sendAlerts
+#### **Step 2: Deploy to Firebase Hosting**
+1. Initialize Firebase Hosting:
+   ```bash
+   firebase init hosting
+   ```
+2. Deploy:
+   ```bash
+   firebase deploy --only hosting
    ```
 
 ---
 
-### **6. Live Monitoring Dashboard**
-Combine alerts with a live dashboard to monitor the system in real-time:
-- Use **Firebase Firestore** to log all events.
-- Create a **React** or **Vue.js** frontend to visualize alert statistics.
+### **4. Additional Enhancements**
+
+1. **Filter Alerts by Severity**
+   Add dropdown filters for severity (`critical`, `warning`, etc.).
+   ```javascript
+   const [filter, setFilter] = useState("");
+   const q = query(
+     collection(db, "alerts"),
+     orderBy("timestamp", "desc"),
+     filter ? where("severity", "==", filter) : undefined
+   );
+   ```
+
+2. **Add Charts**
+   Use libraries like [Chart.js](https://www.chartjs.org/) or [Recharts](https://recharts.org/) to visualize:
+   - Frequency of alerts by severity.
+   - Alerts over time.
+
+3. **Integrate with Notifications**
+   Trigger browser notifications for critical alerts using the [Web Notifications API](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API).
 
 --
