@@ -1,1 +1,5 @@
-
+4. Deployment Checklist
+   -Backend: Deploy your server (Node.js) or Firebase Functions.
+  -Frontend: Deploy React app to Vercel or Netlify with SubscriptionForm integrated.
+   -Database: Firestore set up with rules to protect subscription data.
+  -Notifications: SendGrid configured for email; Firebase Cloud Messaging for push notifications.
